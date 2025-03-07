@@ -55,7 +55,55 @@ const pricing = {
   automation: 40,
   custom_ui: 25,
   database_support: 35,
+  web_dashboard: 45,
+  payment_integration: 40,
+  analytics: 30,
+  hosting: 20,
+  maintenance: 15,
 };
+
+// Quote builder questions sequence
+const quoteBuilderQuestions = [
+  {
+    question: "What type of bot do you need?",
+    options: [
+      { text: "Basic Telegram Bot", value: "basic_bot" },
+      { text: "Advanced Bot with Custom UI", value: "basic_bot,custom_ui" },
+      {
+        text: "E-commerce Bot",
+        value: "basic_bot,custom_ui,payment_integration",
+      },
+    ],
+  },
+  {
+    question: "Do you need API integrations?",
+    options: [
+      { text: "Yes", value: "api_integration" },
+      { text: "No", value: "" },
+    ],
+  },
+  {
+    question: "Do you need database support?",
+    options: [
+      { text: "Yes", value: "database_support" },
+      { text: "No", value: "" },
+    ],
+  },
+  {
+    question: "Do you need a web dashboard?",
+    options: [
+      { text: "Yes", value: "web_dashboard" },
+      { text: "No", value: "" },
+    ],
+  },
+  {
+    question: "Do you need ongoing maintenance?",
+    options: [
+      { text: "Yes", value: "maintenance" },
+      { text: "No", value: "" },
+    ],
+  },
+];
 
 // Inline keyboard options
 const serviceOptions = {
@@ -69,11 +117,41 @@ const serviceOptions = {
         { text: "📊 API Integration", callback_data: "api_integration" },
         { text: "📝 Request a Bot", callback_data: "request_bot" },
       ],
-      [{ text: "💰 Get Pricing", callback_data: "pricing" }],
+      [
+        { text: "💰 Get Pricing", callback_data: "pricing" },
+        { text: "🧮 Interactive Quote", callback_data: "quote_builder" },
+      ],
       [{ text: "💬 Contact Us", callback_data: "contact" }],
     ],
   },
 };
+
+// Helper function to send quote builder questions
+function sendQuoteBuilderQuestion(chatId, userId) {
+  const questionData = quoteBuilderQuestions[userSteps[userId].currentQuestion];
+
+  const options = questionData.options.map((option) => {
+    return [
+      {
+        text: option.text,
+        callback_data: `quote_${option.value}`,
+      },
+    ];
+  });
+
+  bot.sendMessage(
+    chatId,
+    `*Question ${userSteps[userId].currentQuestion + 1}/${
+      quoteBuilderQuestions.length
+    }*\n\n${questionData.question}`,
+    {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: options,
+      },
+    }
+  );
+}
 
 // Handle messages
 bot.on("message", async (msg) => {
@@ -187,10 +265,104 @@ bot.on("callback_query", async (query) => {
         "- `api_integration` ($30)\n" +
         "- `automation` ($40)\n" +
         "- `custom_ui` ($25)\n" +
-        "- `database_support` ($35)",
+        "- `database_support` ($35)\n" +
+        "- `web_dashboard` ($45)\n" +
+        "- `payment_integration` ($40)\n" +
+        "- `analytics` ($30)\n" +
+        "- `hosting` ($20)\n" +
+        "- `maintenance` ($15/month)",
       { parse_mode: "Markdown" }
     );
     userSteps[userId] = { step: "pricing_selection" };
+  } else if (data === "quote_builder") {
+    // Start the quote builder flow
+    userSteps[userId] = {
+      step: "quote_builder",
+      currentQuestion: 0,
+      selectedFeatures: [],
+    };
+
+    // Send first question
+    sendQuoteBuilderQuestion(chatId, userId);
+  } else if (data.startsWith("quote_")) {
+    // Handle quote builder selection
+    if (!userSteps[userId] || userSteps[userId].step !== "quote_builder") {
+      bot.sendMessage(
+        chatId,
+        "Sorry, something went wrong. Please start again with /start"
+      );
+      return;
+    }
+
+    // Parse the selected option
+    const selectedValue = data.replace("quote_", "");
+
+    // Add selection to user's features if it's not empty
+    if (selectedValue) {
+      const features = selectedValue.split(",");
+      features.forEach((feature) => {
+        if (
+          !userSteps[userId].selectedFeatures.includes(feature) &&
+          feature !== ""
+        ) {
+          userSteps[userId].selectedFeatures.push(feature);
+        }
+      });
+    }
+
+    // Move to next question
+    userSteps[userId].currentQuestion++;
+
+    // If we have more questions, send the next one
+    if (userSteps[userId].currentQuestion < quoteBuilderQuestions.length) {
+      sendQuoteBuilderQuestion(chatId, userId);
+    } else {
+      // No more questions, calculate price
+      const totalPrice = userSteps[userId].selectedFeatures.reduce(
+        (sum, feature) => sum + (pricing[feature] || 0),
+        0
+      );
+
+      let featuresList = "";
+      userSteps[userId].selectedFeatures.forEach((feature) => {
+        const price = pricing[feature] || 0;
+        const formattedFeature = feature
+          .replace("_", " ")
+          .replace(/\b\w/g, (l) => l.toUpperCase());
+        featuresList += `- ${formattedFeature}: $${price}\n`;
+      });
+
+      // Send the final quote
+      bot.sendMessage(
+        chatId,
+        `💰 *Your Custom Quote*\n\n` +
+          `Selected Features:\n${featuresList}\n` +
+          `*Total Price: $${totalPrice}*\n\n` +
+          `Would you like to proceed with this quote?`,
+        {
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: "✅ Request This Bot", callback_data: "request_bot" },
+                { text: "🔄 Start Over", callback_data: "quote_builder" },
+              ],
+              [{ text: "🏠 Back to Main Menu", callback_data: "main_menu" }],
+            ],
+          },
+        }
+      );
+
+      // Reset user steps
+      delete userSteps[userId];
+    }
+  } else if (data === "main_menu") {
+    bot.sendMessage(
+      chatId,
+      "🚀 *Welcome to the Bot Development Service!*\n\n" +
+        "What kind of bot are you looking for? Select an option below:",
+      { parse_mode: "Markdown", ...serviceOptions }
+    );
   }
 });
 
